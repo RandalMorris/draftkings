@@ -7,13 +7,9 @@ dat <- read_csv("./data/DKSalaries.csv")
 sample(x = dat$Name, size = 9, prob = dat$Salary)
 
 # filter non starters with high salary, injured, and arbitrary
-qbs <- dat %>% filter(`Roster Position` == "QB", Salary > 4500, !Name == "Jameis Winston")
-rbs <- dat %>% filter(`Roster Position` == "RB/FLEX", Salary > 4000, !Name == "Chris Thompson")
-wr <- dat %>% filter(`Roster Position` == "WR/FLEX", Salary > 4000, 
-                     !Name == "A.J. Green", 
-                     !Name == "Torrey Smith", 
-                     !Name == "Marvin Jones Jr.",
-                     !Name == "Keelan Cole")
+qbs <- dat %>% filter(`Roster Position` == "QB", Salary > 4500, !Name == "Joe Flacco")
+rbs <- dat %>% filter(`Roster Position` == "RB/FLEX", Salary > 4000, !Name == "T.J. Yeldon")
+wr <- dat %>% filter(`Roster Position` == "WR/FLEX", Salary > 4000, !Name == "Keelan Cole",  !Name == "A.J. Green")
 te <- dat %>% filter(`Roster Position` == "TE/FLEX", Salary > 2500)
 dst <- dat %>% filter(`Roster Position` == "DST")
 

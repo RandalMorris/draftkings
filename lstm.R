@@ -26,7 +26,8 @@ dat <-
   read_csv("./data/all_games.csv") %>% 
   janitor::clean_names() %>% 
   filter(complete.cases(.), dk_salary > 0) %>%
-  mutate(name = Name(name))
+  mutate(name = Name(name), player_key = paste(name, team, pos, sep = "_")) %>%
+  select(-gid)
 
 match_nm <- function(nm) {
   
@@ -46,17 +47,60 @@ for (i in t) {
 }
 t_df %>% filter(grepl("Todd", name))
 
-score
+team_names <- function(event, team) {
+  
+  parsed_game_info <- str_split(event, "@| ")
+  
+  df_g <- NULL
+  for (i in 1:length(parsed_game_info)) {
+    
+    g <- parsed_game_info[[i]] 
+    g[1:2] <- tolower(g[1:2])
+    
+    tm <- tolower(team[[i]])
+    
+    g <- str_replace(g, "tb", "tam"); tm <- str_replace(tm, "tb", "tam")
+    g <- str_replace(g, "gb", "gnb"); tm <- str_replace(tm, "gb", "gnb")
+    g <- str_replace(g, "jax", "jac"); tm <- str_replace(tm, "jax", "jac")
+    
+    g <- tibble(team = if_else(g[1]==tm, g[1], g[2]),
+                oppt = if_else(g[1]==tm, g[2], g[1]),
+                h_a = if_else(g[1]==tm, "a", "h"),
+                dt = g[3],
+                game_time = g[4],
+                tz = g[5]
+    )
+    
+    df_g <- bind_rows(df_g, g) %>% as_tibble()
+    
+  }
+  return(df_g)
+  
+}
 
-wk12_2018 <- dat %>% filter(week == 12, year == 2018)
+score <- 
+  score %>% 
+  mutate(week = 13, year = 2018, pos = str_replace(position, "DST", "Def")) %>% 
+  bind_cols(team_names(score$game_info, score$team_abbrev)) %>%
+  select(week, year, name, pos, team, h_a, oppt, dk_salary = salary)
+
+score <- 
+  score %>% 
+  inner_join(t_df, by = c("name" = "name_match")) %>%
+  select(-name) %>% rename(name = name.y) %>% 
+  mutate(dk_points = NA, player_key = paste(name, team, pos, sep = "_"))
+  #inner_join(distinct(dat[dat$year == 2018,], name, pos, team), by = c("name.y" = "name"))
+
+wk13_2018 <- score
+dat <- rbind(dat, score)
 # dat <- dat %>% filter(!week == 12 | !year == 2018)
 
 scaled <- function(data) {
 
-  mn_points <- mean(data[["dk_points"]])
-  sd_points <- sd(data[["dk_points"]])
-  mn_salary <- mean(data[["dk_salary"]])
-  sd_salary <- sd(data[["dk_salary"]])
+  mn_points <- mean(data[["dk_points"]], na.rm = T)
+  sd_points <- sd(data[["dk_points"]], na.rm = T)
+  mn_salary <- mean(data[["dk_salary"]], na.rm = T)
+  sd_salary <- sd(data[["dk_salary"]], na.rm = T)
   
   data <- 
     data %>%
@@ -64,11 +108,12 @@ scaled <- function(data) {
            dk_salary_raw = dk_salary,
            dk_points = (dk_points-mn_points)/sd_points,
            dk_salary = (dk_salary-mn_salary)/sd_salary)
-  return(data)
+  return(list(df = data, mn_points = mn_points, sd_points = sd_points, sd_salary = sd_salary, mn_salary = mn_salary))
 }
 
-dat <- scaled(dat)
-wk12_2018 <- scaled(wk12_2018)
+scaled_dat <- scaled(dat)
+dat <- scaled_dat$df
+wk13_2018 <- scaled(wk13_2018)
 
 # tmp <- dat %>% filter(name == "Brady, Tom" | name == "Bortles, Blake") ## yes I am a jags fan
 
@@ -126,14 +171,19 @@ create_array <- function(data) {
 
 
 l <- create_array(dat)
-l_wk12_2018 <- create_array(wk12_2018)
+l_wk13_2018 <- create_array(wk13_2018$df)
 
-indices <- rowSums(l[[1]][2:18]) > 0# & rowSums(!l[[1]][2:18] == 0) > 5
-x <- l[[1]] %>% filter(indices)
-y <- l[[2]] %>% select(-wk, -year, -player) %>% filter(indices) %>% pull(`17`)
+# indices <- rowSums(l[[1]][2:18]) > 0# & rowSums(!l[[1]][2:18] == 0) > 5
+# wk13_players <- l_wk13_2018[[1]] %>% filter(rowSums(l_wk13_2018[[1]][2:18]) > 0) %>% pull(player) %>% unique()
+
+x <- l[[1]]# %>% filter(indices)
+y <- 
+  l[[2]] %>% # select(-wk, -year, -player) %>% filter(indices) %>% 
+  pull(`17`)
+
 features <- 
   left_join(select(x, player, wk, year), dat, by = c("player" = "player_key", "wk" = "week", "year")) %>% 
-  mutate(bbi = if_else(is.na(gid), 1, 0)) %>% ##bye week | benched | injured
+  mutate(bbi = if_else(is.na(name), 1, 0)) %>% ##bye week | benched | injured
   mutate_all(funs(replace_na(., 0)))
 
 features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk)[, -1]
@@ -154,30 +204,30 @@ features <- features[ord,]
 
 create_sets <- function(x, y, features, yr, week) { # create training and test set for sanity checking predictions (most recent week)
     
-    wk12_2018_indices <- with(x, year == yr & wk == week)
+    wk_2018_indices <- with(x, year == yr & wk == week)
     
     x <- x %>% select(-wk, -year, -player) %>% as.matrix()
     
     adj <- abs(min(y)) + 0.001
     y <- log(y+adj)
     
-    x_train <- x[!wk12_2018_indices,]
-    y_train <- y[!wk12_2018_indices]
-    features_train <- features[!wk12_2018_indices,]
+    x_train <- x[!wk_2018_indices,]
+    y_train <- y[!wk_2018_indices]
+    features_train <- features[!wk_2018_indices,]
     
-    x_test <- x[wk12_2018_indices,]
-    y_test <- y[wk12_2018_indices]
-    features_test <- features[wk12_2018_indices,]
+    x_test <- x[wk_2018_indices,]
+    y_test <- y[wk_2018_indices]
+    features_test <- features[wk_2018_indices,]
     
     x_train <- array_reshape(x_train, dim = c(dim(x_train)[1], dim(x_train)[2], 1))
     x_test <- array_reshape(x_test, dim = c(dim(x_test)[1], dim(x_test)[2], 1))
     
     return(list(train = list(x = x_train, y = y_train, features = features_train), 
-                test = list(x = x_test, y = y_test, features = features_test), adj))
+                test = list(x = x_test, y = y_test, features = features_test), adj = adj))
     
 }
     
-sets <- create_sets(x, y, features, 2018, 12)
+sets <- create_sets(x, y, features, 2018, 13)
 
 
 ## for given DK_Salary what is expected DK_points (include more features, examples below)
@@ -224,12 +274,34 @@ plot(history)
 p <- model %>% predict(list(sets$test$x, sets$test$features))
 p <- p[[1]]
 
-p <- exp(p) - adj
+p <- exp(p) - sets$adj
 
-qplot((p*sd_points)+mn_points)
-
-
-qplot(p*sd_points+mn_points, sets$test$y*sd_points+mn_points) + geom_smooth() + geom_abline()
-qplot(sets$test$x[,17,1]*sd_salary+mn_salary, p*sd_points+mn_points) + geom_smooth()
+qplot((p*scaled_dat$sd_points)+scaled_dat$sd_points)
 
 
+# qplot(p*scaled_dat$sd_points+scaled_dat$mn_points, 
+#       sets$test$y*scaled_dat$sd_points+scaled_dat$mn_points) + geom_smooth() + geom_abline()
+
+qplot(sets$test$x[,17,1]*scaled_dat$sd_salary+scaled_dat$mn_salary, 
+      p*scaled_dat$sd_points+scaled_dat$mn_points) + geom_smooth()
+
+wk13_preds <- 
+  x %>% 
+  filter(year == 2018, wk == 13) %>% 
+  select(1, 18, 19, 20) %>%
+  # filter(player_key %in% wk13_players) %>% 
+  mutate(salary = `17`*scaled_dat$sd_salary+scaled_dat$mn_salary, 
+         projected_points = as.vector(p*scaled_dat$sd_points+scaled_dat$mn_points),
+         team = unlist(lapply(str_split(player, "_"), function(data) data[[2]])),
+         position = unlist(lapply(str_split(player, "_"), function(data) data[[3]]))) %>%
+  select(-`17`)
+
+qplot(data = wk13_preds, x = salary, projected_points) + 
+  geom_smooth()
+
+ggplot(data = wk13_preds, aes(x = salary, projected_points)) + 
+  geom_point() +
+  facet_wrap(~position) +
+  geom_smooth(method = lm, formula = y ~ x)
+
+write_csv(wk13_preds, "./data/preds.csv")

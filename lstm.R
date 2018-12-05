@@ -237,9 +237,9 @@ main_input <- layer_input(shape = dim(sets$train$x)[-1], name = "main_input")
 
 lstm <- 
   main_input %>%
-  # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>%
+  # layer_lstm(units = 17, activity_regularizer = regularizer_l2(), return_sequences = T) %>%
   # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
-  layer_lstm(units = 2, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
+  layer_lstm(units = 4, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
 
 
 aux_output <- ## for training lstm smoothly
@@ -248,23 +248,34 @@ aux_output <- ## for training lstm smoothly
 
 features_input <- layer_input(shape = 82, name = "features_input")
 
+features <- 
+  features_input %>%
+  layer_dense(units = 16, input_shape = dim(features), activation = 'elu') %>%
+  layer_activity_regularization(l2 = 0.01)
+
+features_output <- 
+  features %>% 
+  layer_dense(units = 1, name = "features_output", activation = 'linear')
+
 main_output <- 
-  layer_concatenate(c(lstm, features_input)) %>% ## concat
-  layer_dense(units = 4, input_shape = dim(features), activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
+  layer_concatenate(c(lstm, features)) %>% ## concat
+  layer_dense(units = 3, input_shape = dim(features), activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
   layer_activity_regularization(l2 = 0.01) %>%
+  # layer_dense(units = 32, input_shape = dim(features), activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
+  # layer_activity_regularization(l2 = 0.01) %>%
   layer_dense(units = 1, name = "main_output", activation = 'linear') ## return the expected DK_points
 
 model <-
   keras_model(inputs = c(main_input, features_input),
-              outputs = c(main_output, aux_output))
+              outputs = c(main_output, aux_output, features_output))
 
 model %>% compile(
   optimizer = "adam",
   loss = "mae",
-  loss_weights = c(1.0, 0.2)
+  loss_weights = c(1.0, 0.2, 0.2)
 )
 
-history <- fit(model, x = list(sets$train$x, sets$train$features), y = list(sets$train$y, sets$train$y), 
+history <- fit(model, x = list(sets$train$x, sets$train$features), y = list(sets$train$y, sets$train$y, sets$train$y), 
                validation_split = 0.1, 
                epochs = 1000, 
                # view_metrics = TRUE, 
@@ -276,7 +287,7 @@ p <- p[[1]]
 
 p <- exp(p) - sets$adj
 
-qplot((p*scaled_dat$sd_points)+scaled_dat$sd_points)
+qplot((p*scaled_dat$sd_points)+scaled_dat$mn_points)
 
 
 # qplot(p*scaled_dat$sd_points+scaled_dat$mn_points, 

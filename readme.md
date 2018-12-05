@@ -8,3 +8,8 @@
 * Next Steps:
     * tune hyperparameters
     * use optimizer (salaries, predicted performance, positions)
+
+## Update: Added optimizer (draftkings_optimizeR.R
+* Next Steps:
+    * tune hyperparameters / include more data to the extent the pred model can improve
+    * build more scenarios for each week

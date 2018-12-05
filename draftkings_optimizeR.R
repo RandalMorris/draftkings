@@ -3,7 +3,6 @@ library(readr)
 
 dat <- read_csv("./data/preds.csv")
 
-
 find_teams <- function(train, cap = 50000) {
   ## set constraints to use
   defense <- ifelse(train$position == "Def", 1, 0)
@@ -48,10 +47,9 @@ find_teams <- function(train, cap = 50000) {
   rownames(team) <- NULL
   
   team %>% 
-    mutate(position = factor(position, levels = c("QB", "RB", "WR", "TE", "Def"))) %>% 
+    mutate(position = factor(position, levels = c("QB", "RB", "WR", "TE", "Def")),
+           ActualPoints = sum(dk_points_raw)) %>% 
     arrange(position, desc(salary))
   
 }
-
-find_teams(dat)
 

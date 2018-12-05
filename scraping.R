@@ -29,3 +29,6 @@ ggplot(data = all_games %>% filter(complete.cases(.), `DK salary` > 0)) +
   facet_wrap(facets = ~Year, nrow = 2)
 
 write_csv(all_games, "./data/all_games.csv")
+
+url <- "https://raw.githubusercontent.com/CriticalPathTraining/PowerBiPartyPack/master/NFL/NFL%20Teams.csv"
+download.file(url = url, destfile = "./data/teams.csv")

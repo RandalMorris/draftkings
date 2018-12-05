@@ -6,27 +6,42 @@ library(data.table)
 
 setwd("/home/david/draftkings")
 
+team_city <- 
+  read_csv("./data/teams.csv") %>% 
+  select(Team, City) %>% 
+  mutate(Name = paste0(unlist(lapply(str_split(City, ", "), function(data) data[[1]])), " Defense"))
+
 score <- 
-  read_csv("./data/DKSalaries11_30.csv") %>% 
+  read_csv("./data/DKSalaries12_4.csv") %>% 
   janitor::clean_names() %>% 
   mutate(week = 13, year = 2018) %>% 
-  rename(player_key = name_id)
+  rename(player_key = name_id) %>%
+  mutate(name = sapply(name, 
+                       function(data) {
+                         ifelse(data %in% team_city$Team,
+                         pull(filter(team_city, data==Team), Name),
+                         data)}))
 
 # agrepl("Todd Gurley", "Todd Gurley II") fuzzy matching to fix this..
 Name <- function(player_name) {
   
+  lgical <- !grepl("Defense", player_name)
   p_list <- str_split(player_name, ", ")
   
-  lapply(p_list, function(data) {
-    paste(data[2], data[1])
-  }) %>% unlist()
+  ifelse(
+    lgical,
+    
+    lapply(p_list, function(data) paste(data[2], data[1])) %>% unlist(),
+    
+    player_name
+  )
 }
 
 dat <- 
   read_csv("./data/all_games.csv") %>% 
   janitor::clean_names() %>% 
   filter(complete.cases(.), dk_salary > 0) %>%
-  mutate(name = Name(name), player_key = paste(name, team, pos, sep = "_")) %>%
+  mutate(name = Name(name), player_key = paste(name, pos, sep = "_")) %>%
   select(-gid)
 
 match_nm <- function(nm) {
@@ -88,10 +103,13 @@ score <-
   score %>% 
   inner_join(t_df, by = c("name" = "name_match")) %>%
   select(-name) %>% rename(name = name.y) %>% 
-  mutate(dk_points = NA, player_key = paste(name, team, pos, sep = "_"))
+  mutate(dk_points = NA, player_key = paste(name, pos, sep = "_")) %>%
+  filter(!name == "Max McCaffrey")
   #inner_join(distinct(dat[dat$year == 2018,], name, pos, team), by = c("name.y" = "name"))
 
 wk13_2018 <- score
+wk13_2018 <- dat %>% filter(year == 2018 & week == 13)
+dat <- dat %>% filter(!(year == 2018 & week >= 13))
 dat <- rbind(dat, score)
 # dat <- dat %>% filter(!week == 12 | !year == 2018)
 
@@ -186,8 +204,14 @@ features <-
   mutate(bbi = if_else(is.na(name), 1, 0)) %>% ##bye week | benched | injured
   mutate_all(funs(replace_na(., 0)))
 
-features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk)[, -1]
-features <- apply(features, 2, function(data) (data-mean(data)/sd(data)))
+features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk + player)[, -1]
+features <- as.data.table(features)
+
+cols <- names(features)
+fn_scale <- function(data) (data-mean(data))/sd(data)
+features[ , (cols) := lapply(.SD, fn_scale), .SDcols = cols]
+features <- as.matrix(features)
+
 
 ord <- with(x, order(year, player, wk))
 
@@ -239,18 +263,18 @@ lstm <-
   main_input %>%
   # layer_lstm(units = 17, activity_regularizer = regularizer_l2(), return_sequences = T) %>%
   # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
-  layer_lstm(units = 4, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
+  layer_lstm(units = 17, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
 
 
 aux_output <- ## for training lstm smoothly
   lstm %>%
   layer_dense(units = 1, name = "aux_output", activation = 'linear')
 
-features_input <- layer_input(shape = 82, name = "features_input")
+features_input <- layer_input(shape = 1246, name = "features_input")
 
 features <- 
   features_input %>%
-  layer_dense(units = 16, input_shape = dim(features), activation = 'elu') %>%
+  layer_dense(units = 4, input_shape = dim(features), activation = 'elu') %>%
   layer_activity_regularization(l2 = 0.01)
 
 features_output <- 
@@ -290,9 +314,6 @@ p <- exp(p) - sets$adj
 qplot((p*scaled_dat$sd_points)+scaled_dat$mn_points)
 
 
-# qplot(p*scaled_dat$sd_points+scaled_dat$mn_points, 
-#       sets$test$y*scaled_dat$sd_points+scaled_dat$mn_points) + geom_smooth() + geom_abline()
-
 qplot(sets$test$x[,17,1]*scaled_dat$sd_salary+scaled_dat$mn_salary, 
       p*scaled_dat$sd_points+scaled_dat$mn_points) + geom_smooth()
 
@@ -303,9 +324,9 @@ wk13_preds <-
   # filter(player_key %in% wk13_players) %>% 
   mutate(salary = `17`*scaled_dat$sd_salary+scaled_dat$mn_salary, 
          projected_points = as.vector(p*scaled_dat$sd_points+scaled_dat$mn_points),
-         team = unlist(lapply(str_split(player, "_"), function(data) data[[2]])),
-         position = unlist(lapply(str_split(player, "_"), function(data) data[[3]]))) %>%
-  select(-`17`)
+         position = unlist(lapply(str_split(player, "_"), function(data) data[[2]]))) %>%
+  select(-`17`) %>% 
+  inner_join(wk13_2018$df, by = c("player" = "player_key"))
 
 qplot(data = wk13_preds, x = salary, projected_points) + 
   geom_smooth()
@@ -315,4 +336,11 @@ ggplot(data = wk13_preds, aes(x = salary, projected_points)) +
   facet_wrap(~position) +
   geom_smooth(method = lm, formula = y ~ x)
 
+qplot(data = wk13_preds, x = projected_points, dk_points_raw) + 
+  geom_abline()
+
 write_csv(wk13_preds, "./data/preds.csv")
+
+source("./draftkings_optimizeR.R")
+
+find_teams(dat) %>% View()

@@ -204,7 +204,7 @@ features <-
   mutate(bbi = if_else(is.na(name), 1, 0)) %>% ##bye week | benched | injured
   mutate_all(funs(replace_na(., 0)))
 
-features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk + player)[, -1]
+features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi)[, -1]
 features <- as.data.table(features)
 
 cols <- names(features)
@@ -212,8 +212,7 @@ fn_scale <- function(data) (data-mean(data))/sd(data)
 features[ , (cols) := lapply(.SD, fn_scale), .SDcols = cols]
 features <- as.matrix(features)
 
-
-ord <- with(x, order(year, player, wk))
+ord <- with(x, order(year, wk, player))
 
 x <- x[ord,]
 y <- y[ord]
@@ -263,28 +262,28 @@ lstm <-
   main_input %>%
   # layer_lstm(units = 17, activity_regularizer = regularizer_l2(), return_sequences = T) %>%
   # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
-  layer_lstm(units = 17, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
+  layer_lstm(units = 17)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
 
 
 aux_output <- ## for training lstm smoothly
   lstm %>%
   layer_dense(units = 1, name = "aux_output", activation = 'linear')
 
-features_input <- layer_input(shape = 1246, name = "features_input")
+features_input <- layer_input(shape = 89, name = "features_input")
 
-features <- 
+features_k <- 
   features_input %>%
-  layer_dense(units = 4, input_shape = dim(features), activation = 'elu') %>%
-  layer_activity_regularization(l2 = 0.01)
+  layer_dense(units = 16, input_shape = dim(features), activation = 'elu') #%>%
+  #layer_activity_regularization(l2 = 0.01)
 
 features_output <- 
-  features %>% 
+  features_k %>% 
   layer_dense(units = 1, name = "features_output", activation = 'linear')
 
 main_output <- 
-  layer_concatenate(c(lstm, features)) %>% ## concat
-  layer_dense(units = 3, input_shape = dim(features), activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
-  layer_activity_regularization(l2 = 0.01) %>%
+  layer_concatenate(c(lstm, features_k)) %>% ## concat
+  layer_dense(units = 4, input_shape = dim(features), activation = 'elu') #%>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
+  #layer_activity_regularization(l2 = 0.01) %>%
   # layer_dense(units = 32, input_shape = dim(features), activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
   # layer_activity_regularization(l2 = 0.01) %>%
   layer_dense(units = 1, name = "main_output", activation = 'linear') ## return the expected DK_points
@@ -301,10 +300,20 @@ model %>% compile(
 
 history <- fit(model, x = list(sets$train$x, sets$train$features), y = list(sets$train$y, sets$train$y, sets$train$y), 
                validation_split = 0.1, 
-               epochs = 1000, 
+               epochs = 1000,
                # view_metrics = TRUE, 
-               batch_size = 2^10) # add callback for saving model (in case it takes forever)
-plot(history)
+               batch_size = 2^10
+               ) # add callback for saving model (in case it takes forever)
+
+history_df <- 
+  rbind(
+    data.frame(data = "training", 
+               epochs = 1:history$params$epochs, main_output_loss = history$metrics$main_output_loss),
+    data.frame(data = "validation", 
+               epochs = 1:history$params$epochs, main_output_loss = history$metrics$val_main_output_loss))
+
+ggplot(data = history_df, aes(x = epochs, y = main_output_loss, color = data)) + 
+  geom_point() + geom_line()
 
 p <- model %>% predict(list(sets$test$x, sets$test$features))
 p <- p[[1]]
@@ -312,10 +321,6 @@ p <- p[[1]]
 p <- exp(p) - sets$adj
 
 qplot((p*scaled_dat$sd_points)+scaled_dat$mn_points)
-
-
-qplot(sets$test$x[,17,1]*scaled_dat$sd_salary+scaled_dat$mn_salary, 
-      p*scaled_dat$sd_points+scaled_dat$mn_points) + geom_smooth()
 
 wk13_preds <- 
   x %>% 
@@ -343,4 +348,7 @@ write_csv(wk13_preds, "./data/preds.csv")
 
 source("./draftkings_optimizeR.R")
 
-find_teams(dat) %>% View()
+find_teams(wk13_preds) %>% 
+  select(player, salary, projected_points, dk_points_raw, team, h_a, oppt, 
+         TeamSalary, TotalPoints, ActualPoints) %>%
+  View()

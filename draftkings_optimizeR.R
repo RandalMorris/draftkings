@@ -1,7 +1,7 @@
 library(lpSolveAPI)
 library(readr)
 
-dat <- read_csv("./data/preds.csv")
+# dat <- read_csv("./data/preds.csv")
 
 find_teams <- function(train, cap = 50000) {
   ## set constraints to use

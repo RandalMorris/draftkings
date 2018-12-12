@@ -3,7 +3,7 @@ library(lubridate)
 library(rvest)
 
 WEEKS <- 1:18
-YEARS <- 2013:2018
+YEARS <- 2010:2018
 all_games <- NULL
 
 for (yr in YEARS) {

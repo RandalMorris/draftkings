@@ -5,6 +5,7 @@ library(abind)
 library(data.table)
 
 setwd("/home/david/draftkings")
+source("scraping.R")
 
 team_city <- 
   read_csv("./data/teams.csv") %>% 
@@ -12,15 +13,14 @@ team_city <-
   mutate(Name = paste0(unlist(lapply(str_split(City, ", "), function(data) data[[1]])), " Defense"))
 
 score <- 
-  read_csv("./data/DKSalaries12_4.csv") %>% 
+  read_csv("./data/1209_DKSalaries_2games.csv") %>% 
   janitor::clean_names() %>% 
-  mutate(week = 13, year = 2018) %>% 
   rename(player_key = name_id) %>%
   mutate(name = sapply(name, 
                        function(data) {
                          ifelse(data %in% team_city$Team,
-                         pull(filter(team_city, data==Team), Name),
-                         data)}))
+                                pull(filter(team_city, data==Team), Name),
+                                data)}))
 
 # agrepl("Todd Gurley", "Todd Gurley II") fuzzy matching to fix this..
 Name <- function(player_name) {
@@ -95,7 +95,7 @@ team_names <- function(event, team) {
 
 score <- 
   score %>% 
-  mutate(week = 13, year = 2018, pos = str_replace(position, "DST", "Def")) %>% 
+  mutate(week = 14, year = 2018, pos = str_replace(position, "DST", "Def")) %>% 
   bind_cols(team_names(score$game_info, score$team_abbrev)) %>%
   select(week, year, name, pos, team, h_a, oppt, dk_salary = salary)
 
@@ -105,16 +105,16 @@ score <-
   select(-name) %>% rename(name = name.y) %>% 
   mutate(dk_points = NA, player_key = paste(name, pos, sep = "_")) %>%
   filter(!name == "Max McCaffrey")
-  #inner_join(distinct(dat[dat$year == 2018,], name, pos, team), by = c("name.y" = "name"))
+#inner_join(distinct(dat[dat$year == 2018,], name, pos, team), by = c("name.y" = "name"))
 
 wk13_2018 <- score
-wk13_2018 <- dat %>% filter(year == 2018 & week == 13)
-dat <- dat %>% filter(!(year == 2018 & week >= 13))
-dat <- rbind(dat, score)
+# wk13_2018 <- dat %>% filter(year == 2018 & week == 14)
+# dat <- dat %>% filter(!(year == 2018 & week >= 14))
+dat <- rbind(dat, wk13_2018) #
 # dat <- dat %>% filter(!week == 12 | !year == 2018)
 
 scaled <- function(data) {
-
+  
   mn_points <- mean(data[["dk_points"]], na.rm = T)
   sd_points <- sd(data[["dk_points"]], na.rm = T)
   mn_salary <- mean(data[["dk_salary"]], na.rm = T)
@@ -204,7 +204,7 @@ features <-
   mutate(bbi = if_else(is.na(name), 1, 0)) %>% ##bye week | benched | injured
   mutate_all(funs(replace_na(., 0)))
 
-features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi)[, -1]
+features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk + player)[, -1]
 features <- as.data.table(features)
 
 cols <- names(features)
@@ -218,39 +218,45 @@ x <- x[ord,]
 y <- y[ord]
 features <- features[ord,]
 
-# set.seed(42)
-# shffl <- sample(1:nrow(x))
-# 
-# x <- x[shffl,]
-# y <- y[shffl]
-# features <- features[shffl,]
+set.seed(42)
+shffl <- sample(1:nrow(x))
+
+x <- x[shffl,]
+y <- y[shffl]
+features <- features[shffl,]
+
+zeros_rm <- rowSums(x[,2:18])==0
+
+x <- x[!zeros_rm,]
+y <- y[!zeros_rm]
+features <- features[!zeros_rm,]
 
 create_sets <- function(x, y, features, yr, week) { # create training and test set for sanity checking predictions (most recent week)
-    
-    wk_2018_indices <- with(x, year == yr & wk == week)
-    
-    x <- x %>% select(-wk, -year, -player) %>% as.matrix()
-    
-    adj <- abs(min(y)) + 0.001
-    y <- log(y+adj)
-    
-    x_train <- x[!wk_2018_indices,]
-    y_train <- y[!wk_2018_indices]
-    features_train <- features[!wk_2018_indices,]
-    
-    x_test <- x[wk_2018_indices,]
-    y_test <- y[wk_2018_indices]
-    features_test <- features[wk_2018_indices,]
-    
-    x_train <- array_reshape(x_train, dim = c(dim(x_train)[1], dim(x_train)[2], 1))
-    x_test <- array_reshape(x_test, dim = c(dim(x_test)[1], dim(x_test)[2], 1))
-    
-    return(list(train = list(x = x_train, y = y_train, features = features_train), 
-                test = list(x = x_test, y = y_test, features = features_test), adj = adj))
-    
+  
+  wk_2018_indices <- with(x, year == yr & wk == week)
+  
+  x <- x %>% select(-wk, -year, -player) %>% as.matrix()
+  
+  adj <- abs(min(y)) + 0.001
+  y <- log(y+adj)
+  
+  x_train <- x[!wk_2018_indices,]
+  y_train <- y[!wk_2018_indices]
+  features_train <- features[!wk_2018_indices,]
+  
+  x_test <- x[wk_2018_indices,]
+  y_test <- y[wk_2018_indices]
+  features_test <- features[wk_2018_indices,]
+  
+  x_train <- array_reshape(x_train, dim = c(dim(x_train)[1], dim(x_train)[2], 1))
+  x_test <- array_reshape(x_test, dim = c(dim(x_test)[1], dim(x_test)[2], 1))
+  
+  return(list(train = list(x = x_train, y = y_train, features = features_train), 
+              test = list(x = x_test, y = y_test, features = features_test), adj = adj))
+  
 }
-    
-sets <- create_sets(x, y, features, 2018, 13)
+
+sets <- create_sets(x, y, features, 2018, 14)
 
 
 ## for given DK_Salary what is expected DK_points (include more features, examples below)
@@ -260,57 +266,60 @@ main_input <- layer_input(shape = dim(sets$train$x)[-1], name = "main_input")
 
 lstm <- 
   main_input %>%
-  layer_lstm(units = 17, activity_regularizer = regularizer_l2(), return_sequences = T) %>%
+  layer_lstm(units = 17, recurrent_dropout = 0.1, return_sequences = T) %>%
   # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
-  layer_lstm(units = 3)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
+  layer_lstm(units = 4, recurrent_dropout = 0.1)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
 
 
 aux_output <- ## for training lstm smoothly
   lstm %>%
   layer_dense(units = 1, name = "aux_output", activation = 'linear')
 
-features_input <- layer_input(shape = 89, name = "features_input")
+features_input <- layer_input(shape = 1227, name = "features_input")
 
-# features_k <- 
-#   features_input %>%
-#   layer_dense(units = 16, activation = 'elu') #%>%
-#   #layer_activity_regularization(l2 = 0.01)
-# 
-# features_output <- 
-#   features_k %>% 
-#   layer_dense(units = 1, name = "features_output", activation = 'linear')
+features_k <-
+  features_input %>%
+  layer_dense(units = 32, activation = 'elu') %>%
+  layer_dropout(rate = 0.2) # lot of input features
+
+features_output <-
+  features_k %>%
+  layer_dense(units = 1, name = "features_output", activation = 'linear')
 
 main_output <- 
-  layer_concatenate(c(lstm, features_input)) %>% ## concat
-  layer_dense(units = 16, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
-  #layer_activity_regularization(l2 = 0.01) %>%
-  # layer_dense(units = 32, input_shape = dim(features), activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
+  layer_concatenate(c(lstm, features_k)) %>% ## concat
+  layer_dense(units = 32, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
+  layer_dropout(rate = 0.2) %>%
+  # layer_activity_regularization(l2 = 0.0001) %>%
+  # layer_dense(units = 8, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
+  # layer_dropout(rate = 0.2) %>%
   # layer_activity_regularization(l2 = 0.01) %>%
   layer_dense(units = 1, name = "main_output", activation = 'linear') ## return the expected DK_points
 
 model <-
   keras_model(inputs = c(main_input, features_input),
-              outputs = c(main_output, aux_output))
+              outputs = c(main_output, aux_output, features_output))
 
 model %>% compile(
-  optimizer = "adam",
+  optimizer = optimizer_adam(lr = 0.001),
   loss = "mae",
-  loss_weights = c(1.0, 0.2)
+  loss_weights = c(1.0, 0.2, 0.2)
 )
 
-history <- fit(model, x = list(sets$train$x, sets$train$features), y = list(sets$train$y, sets$train$y), 
-               validation_split = 0.1, 
-               epochs = 200,
+history <- fit(model, x = list(sets$train$x, sets$train$features), y = list(sets$train$y, sets$train$y, sets$train$y), 
+               validation_split = 0.3, 
+               epochs = 1000,
+               callbacks = callback_early_stopping(monitor = "val_main_output_loss", patience = 20),
                # view_metrics = TRUE, 
                batch_size = 2^10
-               ) # add callback for saving model (in case it takes forever)
+) # add callback for saving model (in case it takes forever)
 
 history_df <- 
   rbind(
     data.frame(data = "training", 
-               epochs = 1:history$params$epochs, main_output_loss = history$metrics$main_output_loss),
+               epochs = 1:length(history$metrics$val_main_output_loss), main_output_loss = history$metrics$main_output_loss),
     data.frame(data = "validation", 
-               epochs = 1:history$params$epochs, main_output_loss = history$metrics$val_main_output_loss))
+               epochs = 1:length(history$metrics$val_main_output_loss), main_output_loss = history$metrics$val_main_output_loss))
 
 ggplot(data = history_df, aes(x = epochs, y = main_output_loss, color = data)) + 
   geom_point() + geom_line()
@@ -323,7 +332,7 @@ p <- exp(p) - sets$adj
 
 wk13_preds <- 
   x %>% 
-  filter(year == 2018, wk == 13) %>% 
+  filter(year == 2018, wk == 14) %>% 
   select(1, 18, 19, 20) %>%
   # filter(player_key %in% wk13_players) %>% 
   mutate(salary = `17`*scaled_dat$sd_salary+scaled_dat$mn_salary, 
@@ -349,7 +358,7 @@ write_csv(wk13_preds, "./data/preds.csv")
 
 source("./draftkings_optimizeR.R")
 
-find_teams(wk13_preds) %>% 
+find_teams(wk13_preds %>% filter(!player %in% c("Christian Kirk_WR", "Marshawn Lynch_RB", "Le'Veon Bell_RB", "Melvin Gordon_RB", "Kerryon Johnson_RB"), salary > 2500)) %>% 
   select(player, salary, projected_points, dk_points_raw, team, h_a, oppt, 
          TeamSalary, TotalPoints, ActualPoints) %>%
   View()

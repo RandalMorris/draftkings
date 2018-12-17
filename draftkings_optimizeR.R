@@ -2,8 +2,8 @@ library(lpSolveAPI)
 library(readr)
 
 # dat <- read_csv("./data/preds.csv")
-
-find_teams <- function(train, cap = 50000) {
+train <- wk13_preds
+find_teams <- function(train, cap) {
   ## set constraints to use
   defense <- ifelse(train$position == "Def", 1, 0)
   qb <- ifelse(train$position == "QB", 1, 0)

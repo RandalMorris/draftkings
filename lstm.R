@@ -13,7 +13,7 @@ team_city <-
   mutate(Name = paste0(unlist(lapply(str_split(City, ", "), function(data) data[[1]])), " Defense"))
 
 score <- 
-  read_csv("./data/1216_DKSalaries_15games.csv") %>% 
+  read_csv("./data/1223_DKSalaries_12games.csv") %>% 
   janitor::clean_names() %>% 
   rename(player_key = name_id) %>%
   mutate(name = if_else(roster_position == "DST", paste(tolower(team_abbrev), "Def", sep = "_"), name),
@@ -134,7 +134,7 @@ score <-
 wk13_2018 <- score
 # wk13_2018 <- dat %>% filter(year == 2018 & week == 14)
 # dat <- dat %>% filter(!(year == 2018 & week >= 14))
-dat <- rbind(dat, wk13_2018) #
+# dat <- rbind(dat, wk13_2018) #
 # dat <- dat %>% filter(!week == 12 | !year == 2018)
 
 scaled <- function(data) {
@@ -155,7 +155,7 @@ scaled <- function(data) {
 
 scaled_dat <- scaled(dat)
 dat <- scaled_dat$df
-wk13_2018 <- scaled(wk13_2018)
+wk_2018 <- scaled(wk13_2018)$df
 
 # dat <- dat %>% mutate(player_key = if_else(pos == "Def", paste(team, pos, sep = "_"), player_key))
 # wk13_2018$df <- wk13_2018$df %>% mutate(player_key = if_else(pos == "Def", paste(team, pos, sep = "_"), player_key))
@@ -168,137 +168,80 @@ create_array <- function(data) {
   years <- sort(unique(data[["year"]]))
   players <- sort(unique(data[["player_key"]]))
   
-  dk_salary <- NULL; dk_salary_j <- NULL
-  dk_points <- NULL; dk_points_j <- NULL
-  ref <- NULL
-  
-  for (i in 1:17) {
-    ref_i <- data.frame(wk = rep(i, 17), s = seq(from = i-16, to = i))
-    ref <- rbind(ref, ref_i)
-  }
+  dk_x <- array(numeric(), dim = c(0, 17, 8)); dk_y <- array(numeric(), dim = c(0, 17, 1))
+  teams <- sort(unique(data[["team"]]))
+  positions <- sort(unique(data[["pos"]]))
+  ref <- data.frame(s = 1:17)
   
   for (y in years) {
     
     for (p in players) {
-      print(y)
-      print(p)
+      
+      dk_i <- array(numeric(), dim = c(1, 17, 0))
+      dk_j <- array(numeric(), dim = c(1, 17, 0))
+      
+      # print(y)
+      # print(p)
+      
       x <- data %>% filter(year == y, player_key == p)
       ## need to create windowed matrix here with zero padding for missing weeks (earlier in season)
       
       x_expand <- 
         ref %>% 
-        left_join(x, by = c("s" = "week")) %>% 
-        group_by(wk) %>% 
-        mutate(i = seq(length(wk))) %>% 
-        ungroup()
+        left_join(x, by = c("s" = "week")) %>%
+        rename(wk = s)
       
-      dk_salary_j <- 
-        x_expand %>%
-        select(wk, dk_salary, i) %>% 
-        spread(key = i, value = dk_salary, fill = 0) %>%
-        mutate(year = y, player = p)
+      x_expand <- sapply(x_expand, function(data) replace_na(data, "unk")) %>% as.data.frame()
       
-      dk_points_j <- 
-        x_expand %>% 
-        select(wk, dk_points, i) %>% 
-        spread(key = i, value = dk_points, fill = 0) %>%
-        mutate(`0` = 0) %>%
-        mutate(year = y, player = p) %>%
-        select(wk, `0`, everything())
-        
+      # print(x_expand)
+      for (i in names(x_expand)[-1]) {
+        # print(i)
+        if (i == "dk_points") {
+          dataX <- c("unk", x_expand[[i]][-17])
+          dataY <- x_expand[[i]]
+          # print(dataa)
+          dk_array_y <- array(dataY, dim = c(1,17,1))
+          dk_array <- array(dataX, dim = c(1,17,1))
+          # print(dk_array)
+          dk_i <- abind(dk_i, dk_array_y, along = 3)
+          dk_j <- abind(dk_j, dk_array, along = 3)
+          }
+        else {
+          dataX <- x_expand[[i]]
+          dk_array <- array(dataX, dim = c(1,17,1))
+          dk_j <- abind(dk_j, dk_array, along = 3)
+          }
+          
+      }
+      # print(dk_j)
       
-      dk_salary <- rbind(dk_salary, dk_salary_j)
-      dk_points <- rbind(dk_points, dk_points_j)
+      dk_x <- abind(dk_x, dk_j, along = 1)
+      dk_y <- abind(dk_y, dk_i, along = 1)
       
-      print(list(dim(dk_salary), dim(dk_salary_j), dim(dk_points), dim(dk_points_j)))
+      print(list(c(y, p), dim(dk_j), dim(dk_x), dim(dk_i), dim(dk_y)))
     }
     
   }
   
   t2 <- Sys.time()
-  return(list(dk_salary = dk_salary, dk_points = dk_points, t2-t1))
+  return(list(dk_x = dk_x, dk_y = dk_y, t2-t1))
 }
 
 
-l <- create_array(dat)
-l_wk13_2018 <- create_array(wk13_2018$df)
+train_set <- create_array(select(dat, week, year, player_key, pos, team, h_a, oppt, dk_points, dk_salary))
+test_set <- create_array(select(wk_2018, week, year, player_key, pos, team, h_a, oppt, dk_points, dk_salary))
 
-# indices <- rowSums(l[[1]][2:18]) > 0# & rowSums(!l[[1]][2:18] == 0) > 5
-# wk13_players <- l_wk13_2018[[1]] %>% filter(rowSums(l_wk13_2018[[1]][2:18]) > 0) %>% pull(player) %>% unique()
-
-x <- l[[2]] %>% select(-`17`)
-y <- 
-  l[[2]] %>% # select(-wk, -year, -player) %>% filter(indices) %>% 
-  pull(`17`)
-
-features <- 
-  left_join(select(l[[1]], player, wk, year, `17`), dat, by = c("player" = "player_key", "wk" = "week", "year")) %>% 
-  mutate(bbi = if_else(is.na(name), 1, 0)) %>% ##bye week | benched | injured
-  mutate_all(funs(replace_na(., 0))) %>%
-  rename(salary = `17`)
-
-features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk + player + salary)[, -1]
-features <- as.data.table(features)
-
-cols <- names(features)
-fn_scale <- function(data) (data-mean(data))/sd(data)
-features[ , (cols) := lapply(.SD, fn_scale), .SDcols = cols]
-features <- as.matrix(features)
-
-ord <- with(x, order(year, wk, player))
-
-x <- x[ord,]
-y <- y[ord]
-features <- features[ord,]
+train_x <- train_set$dk_x
+train_y <- train_set$dk_y
+test_x <- test_set$dk_x
+test_y <- test_set$dk_y
 
 set.seed(42)
-shffl <- sample(1:nrow(x))
+shffl <- sample(1:dim(train_x)[1])
 
-x <- x[shffl,]
-y <- y[shffl]
-features <- features[shffl,]
+train_x <- train_x[shffl,,]
+train_y <- train_y[shffl,,]
 
-zeros_rm <- rowSums(x[,2:18])==0
-
-x <- x[!zeros_rm,]
-y <- y[!zeros_rm]
-features <- features[!zeros_rm,]
-
-create_sets <- function(x, y, features, yr, week) { # create training and test set for sanity checking predictions (most recent week)
-  
-  wk_2018_indices <- with(x, year == yr & wk == week)
-  
-  # (rowSums(x %>% select(2:18) == 0) < 12) %>% qplot()
-  val_indices <- rowSums(x %>% select(2:18) == 0) < 13
-  val_indices <- 1:length(val_indices) %in% sample(which(val_indices), 5000)
-  
-  x <- x %>% select(-wk, -year, -player) %>% as.matrix()
-  adj <- abs(min(y)) + 0.001
-  y <- log(y+adj)
-  
-  x_train <- x[!(wk_2018_indices),] #  | val_indices 
-  y_train <- y[!(wk_2018_indices)] #  | val_indices
-  features_train <- features[!(wk_2018_indices),] #  | val_indices
-  
-  x_test <- x[wk_2018_indices,]
-  y_test <- y[wk_2018_indices]
-  features_test <- features[wk_2018_indices,]
-  
-  # x_val <- x[val_indices,]
-  # y_val <- y[val_indices]
-  # features_val <- features[val_indices,]
-  
-  x_train <- array_reshape(x_train, dim = c(dim(x_train)[1], dim(x_train)[2], 1))
-  x_test <- array_reshape(x_test, dim = c(dim(x_test)[1], dim(x_test)[2], 1))
-  # x_val <- array_reshape(x_val, dim = c(dim(x_val)[1], dim(x_val)[2], 1))
-  
-  return(list(train = list(x = x_train, y = y_train, features = features_train),
-              # validation_data = list(x = x_val, y = y_val, features = features_val),
-              test = list(x = x_test, y = y_test, features = features_test), adj = adj))
-  
-}
-
-sets <- create_sets(x, y, features, 2018, 15)
 
 ## for given DK_Salary what is expected DK_points (include more features, examples below)
 keras::k_clear_session()

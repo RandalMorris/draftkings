@@ -242,47 +242,43 @@ shffl <- sample(1:dim(train_x)[1])
 train_x <- train_x[shffl,,]
 train_y <- train_y[shffl,,]
 
+yrs <- unique(dat$year)
+players <- unique(c(dat$player_key, score$player_key))
+pos <- unique(dat$pos)
+teams <- unique(dat$team)
+h_a <- unique(dat$h_a)
+oppts <- unique(dat$oppt)
+
+train_x[,,7] <- apply(train_x[,,7], 2, function(data) as.numeric(replace_na(as.numeric(data), 0)))
+train_x[,,8] <- apply(train_x[,,8], 2, function(data) as.numeric(replace_na(as.numeric(data), 0)))
+train_y <- apply(train_y, 2, function(data) as.numeric(replace_na(as.numeric(data), 0)))
 
 ## for given DK_Salary what is expected DK_points (include more features, examples below)
 keras::k_clear_session()
 
-main_input <- layer_input(shape = dim(sets$train$x)[-1], name = "main_input")
+dkmodel <- function(Tx, n_a, n_values) {
+  
+  main_input <- layer_input(shape = c(T_x, n_values), name = "main_input")
+  
+  for (t in 1:Tx) {
+    
+    x <- layer_lambda(main_input, function(X) X[,t,])
+    
+    x <- k_reshape(x, c(1, 17))
+    
+    lstm <- 
+      x %>%
+      layer_lstm(units = 17)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
 
-lstm <- 
-  main_input %>%
-  layer_lstm(units = 17, return_sequences = T) %>%
-  # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
-  layer_lstm(units = 17)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
+    main_output <- 
+      lstm %>% ## concat
+      layer_dense(units = 1, name = "main_output", activation = 'linear') ## return the expected DK_points
 
-
-aux_output <- ## for training lstm smoothly
-  lstm %>%
-  layer_dense(units = 1, name = "aux_output", activation = 'linear')
-
-features_input <- layer_input(shape = 1198, name = "features_input")
-
-features_k <-
-  features_input %>%
-  layer_dense(units = 64, activation = 'elu') %>%
-  layer_dropout(rate = 0.2) # lot of input features
-
-features_output <-
-  features_k %>%
-  layer_dense(units = 1, name = "features_output", activation = 'linear')
-
-main_output <- 
-  layer_concatenate(c(lstm, features_k)) %>% ## concat
-  layer_dense(units = 64, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
-  layer_dropout(rate = 0.4) %>%
-  # layer_activity_regularization(l2 = 0.01) %>%
-  # layer_dense(units = 8, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
-  # layer_dropout(rate = 0.2) %>%
-  # layer_activity_regularization(l2 = 0.01) %>%
-  layer_dense(units = 1, name = "main_output", activation = 'linear') ## return the expected DK_points
-
-model <-
-  keras_model(inputs = c(main_input, features_input),
-              outputs = c(main_output, aux_output, features_output))
+  model <-
+    keras_model(inputs = main_input,
+                outputs = main_output)
+  }
+}
 
 model %>% compile(
   optimizer = optimizer_adam(lr = 0.001),

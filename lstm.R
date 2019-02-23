@@ -13,7 +13,7 @@ team_city <-
   mutate(Name = paste0(unlist(lapply(str_split(City, ", "), function(data) data[[1]])), " Defense"))
 
 score <- 
-  read_csv("./data/1216_DKSalaries_15games.csv") %>% 
+  read_csv("./data/0112_DKSalaries_4games.csv") %>% 
   janitor::clean_names() %>% 
   rename(player_key = name_id) %>%
   mutate(name = if_else(roster_position == "DST", paste(tolower(team_abbrev), "Def", sep = "_"), name),
@@ -64,6 +64,8 @@ dat <-
          oppt = str_replace(oppt, "nor", "no"),
          oppt = str_replace(oppt, "sfo", "sf"),
          oppt = str_replace(oppt, "kan", "kc"),
+         player_key = str_replace(player_key, "PatrickMahomes II_QB", "PatrickMahomes_QB"),
+         name = str_replace(name, "PatrickMahomes II", "PatrickMahomes"),
          name = if_else(pos == "Def", paste(team, pos, sep = "_"), name),
          player_key = if_else(pos == "Def", paste(team, pos, sep = "_"), player_key))
 
@@ -114,7 +116,7 @@ team_names <- function(event, team) {
 
 score <- 
   score %>% 
-  mutate(week = 15, year = 2018, pos = str_replace(position, "DST", "Def")) %>% 
+  mutate(week = 18, year = 2018, pos = str_replace(position, "DST", "Def")) %>% 
   bind_cols(team_names(score$game_info, score$team_abbrev)) %>%
   select(week, year, name, pos, team, h_a, oppt, dk_salary = salary)
 
@@ -172,8 +174,8 @@ create_array <- function(data) {
   dk_points <- NULL; dk_points_j <- NULL
   ref <- NULL
   
-  for (i in 1:17) {
-    ref_i <- data.frame(wk = rep(i, 17), s = seq(from = i-16, to = i))
+  for (i in 1:18) {
+    ref_i <- data.frame(wk = rep(i, 18), s = seq(from = i-17, to = i))
     ref <- rbind(ref, ref_i)
   }
   
@@ -221,21 +223,23 @@ create_array <- function(data) {
 
 
 l <- create_array(dat)
+
 l_wk13_2018 <- create_array(wk13_2018$df)
 
 # indices <- rowSums(l[[1]][2:18]) > 0# & rowSums(!l[[1]][2:18] == 0) > 5
 # wk13_players <- l_wk13_2018[[1]] %>% filter(rowSums(l_wk13_2018[[1]][2:18]) > 0) %>% pull(player) %>% unique()
 
-x <- l[[2]] %>% select(-`17`)
-y <- 
-  l[[2]] %>% # select(-wk, -year, -player) %>% filter(indices) %>% 
-  pull(`17`)
+x <- l[[2]] %>% select(-`0`, -`18`)
+y <- l[[2]] %>% pull(`18`)
+
+
+salaries <- l[[1]] %>% select(wk, `18`, year, player)
 
 features <- 
-  left_join(select(l[[1]], player, wk, year, `17`), dat, by = c("player" = "player_key", "wk" = "week", "year")) %>% 
+  left_join(select(x, player, wk, year), dat, by = c("player" = "player_key", "wk" = "week", "year")) %>% 
   mutate(bbi = if_else(is.na(name), 1, 0)) %>% ##bye week | benched | injured
   mutate_all(funs(replace_na(., 0))) %>%
-  rename(salary = `17`)
+  rename(salary = dk_salary_raw)
 
 features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk + player + salary)[, -1]
 features <- as.data.table(features)
@@ -298,7 +302,7 @@ create_sets <- function(x, y, features, yr, week) { # create training and test s
   
 }
 
-sets <- create_sets(x, y, features, 2018, 15)
+sets <- create_sets(x, y, features, 2018, 18)
 
 ## for given DK_Salary what is expected DK_points (include more features, examples below)
 keras::k_clear_session()
@@ -307,7 +311,7 @@ main_input <- layer_input(shape = dim(sets$train$x)[-1], name = "main_input")
 
 lstm <- 
   main_input %>%
-  layer_lstm(units = 17, return_sequences = T) %>%
+  layer_lstm(units = 34, return_sequences = T) %>%
   # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
   layer_lstm(units = 17)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
 
@@ -316,7 +320,7 @@ aux_output <- ## for training lstm smoothly
   lstm %>%
   layer_dense(units = 1, name = "aux_output", activation = 'linear')
 
-features_input <- layer_input(shape = 1198, name = "features_input")
+features_input <- layer_input(shape = 1203, name = "features_input")
 
 features_k <-
   features_input %>%
@@ -376,13 +380,13 @@ p <- exp(p) - sets$adj
 wk13_preds <- 
   x %>% 
   mutate(player = str_replace(player, "NA ", "")) %>%
-  filter(year == 2018, wk == 15) %>% 
+  filter(year == 2018, wk == 18) %>% 
   select(1, 18, 19, 20) %>%
   # filter(player_key %in% wk13_players) %>% 
   mutate(# salary = sets$test$features[,"salary"]*scaled_dat$sd_salary+scaled_dat$mn_salary, 
          projected_points = as.vector(p*scaled_dat$sd_points+scaled_dat$mn_points),
          position = unlist(lapply(str_split(player, "_"), function(data) data[[2]]))) %>%
-  select(-`16`) %>% 
+  select(-`17`) %>% 
   inner_join(wk13_2018$df, by = c("player" = "player_key")) %>%
   mutate(salary = dk_salary_raw)
 
@@ -405,29 +409,13 @@ source("./draftkings_optimizeR.R")
 
 a <- 
   find_teams(cap = 50000, wk13_preds %>% 
-               filter(!player %in% c("CurtisSamuel_WR", "Le'VeonBell_RB", "OdellBeckhamJr._WR", "Jeff WilsonJr._RB", "MarshawnLynch_RB", "BlakeBortles_QB"), 
-                      salary > 2500,
-                      !team %in% c("hou", "cle", "nyj", "den", "nyg"))) %>% 
+               filter(!player %in% c("Le'VeonBell_RB"), 
+                      (salary > 2500 & pos == "TE") |
+                      (salary > 5000 & pos == "QB") |
+                      (salary > 3000 & pos == "WR") |
+                      (salary > 3000 & pos == "RB") |
+                      (salary > 0 & pos == "Def"))) %>% 
   select(player, salary, projected_points, dk_points_raw, team, h_a, oppt, 
          TeamSalary, TotalPoints, ActualPoints)
 
 View(a)
-
-b <- 
-  find_teams(cap = 50000-6700, wk13_preds %>% 
-               filter(!player %in% c("Le'VeonBell_RB", "OdellBeckhamJr._WR", "Jeff WilsonJr._RB", "MarshawnLynch_RB", "BlakeBortles_QB", "SaquonBarkley_RB"), # obj is out vs titans 
-                      salary > 2500,
-                      !team %in% c("hou", "cle", "nyj", "den", "nyg"))) %>% # obj..
-  select(player, salary, projected_points, dk_points_raw, team, h_a, oppt, 
-         TeamSalary, TotalPoints, ActualPoints)
-View(b)
-
-c <- 
-  find_teams(cap = 50000-6700, wk13_preds %>% 
-               filter(!player %in% c("ToddGurley_RB", "AdamThielen_WR", "EzekielElliott_RB", "Le'VeonBell_RB", "OdellBeckhamJr._WR", "Jeff WilsonJr._RB", "MarshawnLynch_RB", "BlakeBortles_QB", "SaquonBarkley_RB"), 
-                      salary > 2500,
-                      !team %in% c("hou", "cle", "nyj", "den", "nyg"))) %>% # obj.. 
-  select(player, salary, projected_points, dk_points_raw, team, h_a, oppt, 
-         TeamSalary, TotalPoints, ActualPoints)
-  
-View(c)

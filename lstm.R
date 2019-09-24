@@ -13,7 +13,7 @@ team_city <-
   mutate(Name = paste0(unlist(lapply(str_split(City, ", "), function(data) data[[1]])), " Defense"))
 
 score <- 
-  read_csv("./data/0112_DKSalaries_4games.csv") %>% 
+  read_csv("./data/09082019_DK_Salaries_13games.csv") %>% 
   janitor::clean_names() %>% 
   rename(player_key = name_id) %>%
   mutate(name = if_else(roster_position == "DST", paste(tolower(team_abbrev), "Def", sep = "_"), name),
@@ -116,7 +116,7 @@ team_names <- function(event, team) {
 
 score <- 
   score %>% 
-  mutate(week = 18, year = 2018, pos = str_replace(position, "DST", "Def")) %>% 
+  mutate(week = 1, year = 2019, pos = str_replace(position, "DST", "Def")) %>% 
   bind_cols(team_names(score$game_info, score$team_abbrev)) %>%
   select(week, year, name, pos, team, h_a, oppt, dk_salary = salary)
 

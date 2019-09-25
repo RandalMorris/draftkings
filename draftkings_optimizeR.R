@@ -28,6 +28,7 @@ find_teams <- function(train, cap) {
   add.constraint(lpfantasy, dk_total, "=", 9)
   
   add.constraint(lpfantasy, train$salary, "<=", cap)
+  add.constraint(lpfantasy, train$salary, ">=", 49000)
   
   lp.control(lpfantasy, sense='max')
   

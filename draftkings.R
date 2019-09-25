@@ -6,22 +6,23 @@ dat <- read_csv("./data/preds.csv")
 
 dat <- 
   dat %>% 
-  filter((salary > 2500 & pos == "TE") |
-           (salary > 5000 & pos == "QB") |
-           (salary > 3000 & pos == "WR") |
-           (salary > 3000 & pos == "RB") |
-           (salary > 0 & pos == "Def"),
-         projected_points > 0) %>%
-  rename(franchise = team)
+  filter((dk_salary.x > 2500 & pos.x == "TE") |
+           (dk_salary.x > 4700 & pos.x == "QB") |
+           (dk_salary.x > 3000 & pos.x == "WR") |
+           (dk_salary.x > 3000 & pos.x == "RB") |
+           (dk_salary.x > 0 & pos.x == "Def"),
+         projected_points > 0,
+         !player %in% c("BlakeBortles_QB", "A.J.Green_WR", "joshDoctson_WR", "JoshDoctson_WR", "DavidMoore_WR", "AlexErickson_WR")) %>%
+  rename(franchise = team.x)
 
 sample(x = dat$player, size = 9, prob = dat$projected_points)
 
 # filter non starters with high salary, injured, and arbitrary
-qbs <- dat %>% filter(pos == "QB")
-rbs <- dat %>% filter(pos == "RB")
-wr <- dat %>% filter(pos == "WR")
-te <- dat %>% filter(pos == "TE")
-dst <- dat %>% filter(pos == "Def")
+qbs <- dat %>% filter(pos.x == "QB")
+rbs <- dat %>% filter(pos.x == "RB")
+wr <- dat %>% filter(pos.x == "WR")
+te <- dat %>% filter(pos.x == "TE")
+dst <- dat %>% filter(pos.x == "Def")
 
 lst <- 
   list(
@@ -50,8 +51,8 @@ for (j in 1:1000) {
     for (i in lst) {
       team <- rbind(team, sample_position(i))
     }
-    cond1 <- sum(team$dk_salary_raw) > 49000 # try to use almost all of the money
-    cond2 <- sum(team$dk_salary_raw) <= 50000 # max spend
+    cond1 <- sum(team$dk_salary.x) > 49000 # try to use almost all of the money
+    cond2 <- sum(team$dk_salary.x) <= 50000 # max spend
     cond3 <- !team$player %>% duplicated %>% any() # playoffs have to have team dupes
     
     # print(c(cond1, cond2, cond3))
@@ -66,9 +67,9 @@ for (j in 1:1000) {
     team %>% 
     mutate(team_i = j, 
            team_points = sum(projected_points), 
-           team_salary = sum(dk_salary_raw),
-           pos = factor(pos, levels = c("QB", "RB", "WR", "TE", "Def"))) %>%
-    select(team_i, franchise, oppt, wk, year=year.x, player, projected_points, dk_salary = dk_salary_raw, pos, team_points, team_salary) %>%
+           team_salary = sum(dk_salary.x),
+           pos = factor(pos.x, levels = c("QB", "RB", "WR", "TE", "Def"))) %>%
+    select(team_i, franchise, oppt, wk=week, year=year, player, projected_points, dk_salary = dk_salary.x, pos = pos.x, team_points, team_salary) %>%
     arrange(pos, desc(projected_points))
   
   teams <- rbind(teams, team)
@@ -96,11 +97,5 @@ View(teams_filtered)
 
 # build lineup based on starting qb
 teams_filtered %>% group_by(team_i) %>% filter(any(player == "TomBrady_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "DrewBrees_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "PatrickMahommes_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "PhilipRivers_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "DakPrescott_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "JaredGoff_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "NickFoles_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "AndrewLuck_QB")) %>% ungroup() %>% top_n(1, team_points)
+teams_filtered %>% group_by(team_i) %>% filter(any(player == "GardnerMinshew_QB")) %>% ungroup() %>% top_n(1, team_points)
 

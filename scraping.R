@@ -3,7 +3,7 @@ library(lubridate)
 library(rvest)
 
 WEEKS <- 1:18
-YEARS <- 2010:2018
+YEARS <- 2010:2019
 all_games <- NULL
 
 for (yr in YEARS) {
@@ -32,3 +32,4 @@ write_csv(all_games, "./data/all_games.csv")
 
 url <- "https://raw.githubusercontent.com/CriticalPathTraining/PowerBiPartyPack/master/NFL/NFL%20Teams.csv"
 download.file(url = url, destfile = "./data/teams.csv")
+

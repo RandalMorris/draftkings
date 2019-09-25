@@ -5,7 +5,7 @@ library(abind)
 library(data.table)
 
 setwd("/home/david/draftkings")
-source("scraping.R")
+#source("scraping.R")
 
 team_city <- 
   read_csv("./data/teams.csv") %>% 
@@ -13,7 +13,7 @@ team_city <-
   mutate(Name = paste0(unlist(lapply(str_split(City, ", "), function(data) data[[1]])), " Defense"))
 
 score <- 
-  read_csv("./data/09082019_DK_Salaries_13games.csv") %>% 
+  read_csv("./data/09222019_DK_Salaries.csv") %>% 
   janitor::clean_names() %>% 
   rename(player_key = name_id) %>%
   mutate(name = if_else(roster_position == "DST", paste(tolower(team_abbrev), "Def", sep = "_"), name),
@@ -116,7 +116,7 @@ team_names <- function(event, team) {
 
 score <- 
   score %>% 
-  mutate(week = 1, year = 2019, pos = str_replace(position, "DST", "Def")) %>% 
+  mutate(week = 3, year = 2019, pos = str_replace(position, "DST", "Def")) %>% 
   bind_cols(team_names(score$game_info, score$team_abbrev)) %>%
   select(week, year, name, pos, team, h_a, oppt, dk_salary = salary)
 
@@ -130,7 +130,7 @@ score <-
          dk_points = NA, 
          player_key = if_else(grepl("Def", name), name, paste(name, pos, sep = "_"))) %>%
   select(-name.y) %>%
-  filter(!name == "Max McCaffrey", !duplicated(.))
+  filter(!name == "Max McCaffrey", !name == "MaxMcCaffrey", !duplicated(.))
 #inner_join(distinct(dat[dat$year == 2018,], name, pos, team), by = c("name.y" = "name"))
 
 wk13_2018 <- score
@@ -222,26 +222,29 @@ create_array <- function(data) {
 }
 
 
-l <- create_array(dat)
-
-l_wk13_2018 <- create_array(wk13_2018$df)
+# l <- create_array(dat)
+# 
+# l_wk13_2018 <- create_array(wk13_2018$df)
 
 # indices <- rowSums(l[[1]][2:18]) > 0# & rowSums(!l[[1]][2:18] == 0) > 5
 # wk13_players <- l_wk13_2018[[1]] %>% filter(rowSums(l_wk13_2018[[1]][2:18]) > 0) %>% pull(player) %>% unique()
 
-x <- l[[2]] %>% select(-`0`, -`18`)
-y <- l[[2]] %>% pull(`18`)
+x <- dat %>% select(dk_salary, player=player_key, wk=week,  year)
+y <- dat %>% pull(dk_points) %>% as.array()
 
 
-salaries <- l[[1]] %>% select(wk, `18`, year, player)
+salaries <- wk13_2018$df %>% select(dk_salary, player=player_key, wk=week, year)
 
 features <- 
   left_join(select(x, player, wk, year), dat, by = c("player" = "player_key", "wk" = "week", "year")) %>% 
   mutate(bbi = if_else(is.na(name), 1, 0)) %>% ##bye week | benched | injured
   mutate_all(funs(replace_na(., 0))) %>%
-  rename(salary = dk_salary_raw)
+  rename(salary = dk_salary_raw) %>%
+  distinct()
 
-features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + bbi + wk + player + salary)[, -1]
+features <- model.matrix(data = features, dk_points_raw ~ as.factor(year) + pos + h_a + oppt + team + 
+                           #bbi + 
+                           wk + player + salary)[, -1]
 features <- as.data.table(features)
 
 cols <- names(features)
@@ -258,74 +261,81 @@ features <- features[ord,]
 set.seed(42)
 shffl <- sample(1:nrow(x))
 
-x <- x[shffl,]
-y <- y[shffl]
-features <- features[shffl,]
+# x <- x[shffl,]
+# y <- y[shffl]
+# features <- features[shffl,]
 
-zeros_rm <- rowSums(x[,2:18])==0
+# zeros_rm <- rowSums(x[,2:18])==0
 
-x <- x[!zeros_rm,]
-y <- y[!zeros_rm]
-features <- features[!zeros_rm,]
+# x <- x[!zeros_rm,]
+# y <- y[!zeros_rm]
+# features <- features[!zeros_rm,]
+# x <- x[!is.na(y),]
+# features <- features[!is.na(y),]
+# y <- y[!is.na(y)]
 
 create_sets <- function(x, y, features, yr, week) { # create training and test set for sanity checking predictions (most recent week)
-  
+  print(1)
   wk_2018_indices <- with(x, year == yr & wk == week)
   
   # (rowSums(x %>% select(2:18) == 0) < 12) %>% qplot()
-  val_indices <- rowSums(x %>% select(2:18) == 0) < 13
-  val_indices <- 1:length(val_indices) %in% sample(which(val_indices), 5000)
-  
+  # val_indices <- rowSums(x %>% select(2:18) == 0) < 13
+  # val_indices <- 1:length(val_indices) %in% sample(which(val_indices), 5000)
+  print(2)
   x <- x %>% select(-wk, -year, -player) %>% as.matrix()
-  adj <- abs(min(y)) + 0.001
-  y <- log(y+adj)
-  
-  x_train <- x[!(wk_2018_indices),] #  | val_indices 
+  print(3)
+  x_train <- x[!(wk_2018_indices)] %>% as.matrix()#  | val_indices 
   y_train <- y[!(wk_2018_indices)] #  | val_indices
   features_train <- features[!(wk_2018_indices),] #  | val_indices
-  
-  x_test <- x[wk_2018_indices,]
+  print(4)
+  adj <- abs(min(y_train)) + 0.001
+  y_train <- log(y_train+adj)
+  print(5)
+  x_test <- x[wk_2018_indices] %>% as.matrix()
   y_test <- y[wk_2018_indices]
   features_test <- features[wk_2018_indices,]
   
   # x_val <- x[val_indices,]
   # y_val <- y[val_indices]
   # features_val <- features[val_indices,]
-  
-  x_train <- array_reshape(x_train, dim = c(dim(x_train)[1], dim(x_train)[2], 1))
-  x_test <- array_reshape(x_test, dim = c(dim(x_test)[1], dim(x_test)[2], 1))
+  print(6)
+  print(class(x_train))
+  print(class(x_test))
+  x_train <- array_reshape(x_train, dim = c(dim(x_train)[1], 1, 1))
+  x_test <- array_reshape(x_test, dim = c(dim(x_test)[1], 1, 1))
   # x_val <- array_reshape(x_val, dim = c(dim(x_val)[1], dim(x_val)[2], 1))
-  
+  print(7)
   return(list(train = list(x = x_train, y = y_train, features = features_train),
               # validation_data = list(x = x_val, y = y_val, features = features_val),
               test = list(x = x_test, y = y_test, features = features_test), adj = adj))
   
 }
 
-sets <- create_sets(x, y, features, 2018, 18)
+sets <- create_sets(x, y, features, 2019, 3)
 
 ## for given DK_Salary what is expected DK_points (include more features, examples below)
 keras::k_clear_session()
 
-main_input <- layer_input(shape = dim(sets$train$x)[-1], name = "main_input")
+main_input <- layer_input(batch_shape = c(1, dim(sets$train$x)[-1]), name = "main_input")
 
 lstm <- 
   main_input %>%
-  layer_lstm(units = 34, return_sequences = T) %>%
-  # layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
-  layer_lstm(units = 17)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
+  layer_lstm(units = 30, activity_regularizer = regularizer_l2(), return_sequences = T, stateful = T) %>%
+  #layer_lstm(units = 4, activity_regularizer = regularizer_l2(), return_sequences = T) %>% ## lstm return_sequences = T
+  layer_lstm(units = 30, activity_regularizer = regularizer_l2(), stateful = T)#, activity_regularizer = regularizer_l2(l = 0.01)) ## lstm return_sequences = T
 
 
 aux_output <- ## for training lstm smoothly
   lstm %>%
   layer_dense(units = 1, name = "aux_output", activation = 'linear')
 
-features_input <- layer_input(shape = 1203, name = "features_input")
+features_input <- layer_input(batch_shape = c(1, dim(sets$train$features)[2]), name = "features_input")
 
 features_k <-
   features_input %>%
-  layer_dense(units = 64, activation = 'elu') %>%
-  layer_dropout(rate = 0.2) # lot of input features
+  layer_dense(units = 32, activation = 'elu', batch_size = 1) %>%
+  layer_dropout(rate = 0.2)# lot of input features
+  #layer_activity_regularization(l2 = 0.01) 
 
 features_output <-
   features_k %>%
@@ -333,8 +343,8 @@ features_output <-
 
 main_output <- 
   layer_concatenate(c(lstm, features_k)) %>% ## concat
-  layer_dense(units = 64, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
-  layer_dropout(rate = 0.4) %>%
+  layer_dense(units = 32, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
+  layer_dropout(rate = 0.2) %>%
   # layer_activity_regularization(l2 = 0.01) %>%
   # layer_dense(units = 8, activation = 'elu') %>%  ## add in home/away, onehot vector for player, onehot vector for team, onehot vector for opponent team
   # layer_dropout(rate = 0.2) %>%
@@ -351,42 +361,93 @@ model %>% compile(
   loss_weights = c(1.0, 0.2, 0.1)
 )
 
-history <- fit(model, x = list(sets$train$x, sets$train$features), y = list(sets$train$y, sets$train$y, sets$train$y), 
-               validation_split = 0.3,
-               # validation_data = list(list(sets$validation_data$x, sets$validation_data$features),
-               #                        list(sets$validation_data$y, sets$validation_data$y, sets$validation_data$y)),
-               epochs = 1000,
-               callbacks = callback_early_stopping(monitor = "val_main_output_loss", patience = 10),
-               # view_metrics = TRUE, 
-               batch_size = 2^10
-) # add callback for saving model (in case it takes forever)
+df_batches <- count(x, year, wk) %>% select(year, n)
+df_batches <- df_batches[-dim(df_batches)[1], ]
+years <- df_batches %>% pull(year) %>% unique()
 
-history_df <- 
-  rbind(
-    data.frame(data = "training", 
-               epochs = 1:length(history$metrics$val_main_output_loss), main_output_loss = history$metrics$main_output_loss),
-    data.frame(data = "validation", 
-               epochs = 1:length(history$metrics$val_main_output_loss), main_output_loss = history$metrics$val_main_output_loss))
+for (e in 1:1000) {
 
-ggplot(data = history_df, aes(x = epochs, y = main_output_loss, color = data)) + 
-  geom_point() + geom_line()
+  prev <- 0
+  
+  for (yr in (years)) {
+    
+    i <- 0
+    j <- 0
+    
+    if (!yr == prev) {
+      
+      reset_states(model)
+      cat("\nresetting_states\n")
+      
+    }
+    
+    batches <- df_batches %>% filter(year == yr) %>% pull(n)
+    prev <- yr
+    
+    for (batch in batches) { 
+      
+      i <- sum(i, batch)
+        
+      x_train <- sets$train$x[j:i, , , drop=F]
+      x_features <- sets$train$features[j:i, , drop=F]
+      y_train <- sets$train$y[j:i, drop=F]
+      
+      cat(j, ", ", i, "\n")
+      
+      j <- i+1
+      
+      
+      history <- fit(model,
+                       x = list(x_train, x_features),
+                       y = list(y_train, y_train, y_train),
+                       validation_split = 0.1,
+                       # validation_data = list(list(sets$validation_data$x, sets$validation_data$features),
+                       #                        list(sets$validation_data$y, sets$validation_data$y, sets$validation_data$y)),
+                       epochs = 1,
+                       # view_metrics = TRUE,
+                       batch_size = 1,
+                       callback = list(
+                         callback_model_checkpoint('./checkpoints/model.hdf5'))
+      ) # add callback for saving model (in case it takes forever)
+  
+      # history <- c(history, history_i)
+      
+      cat("\n", e, "---", yr, "---", batch, "---", dim(x_train), "---", dim(x_features), "---", dim(y_train), "\n")
+        
+    }
+    
+  }
+  
+}
+      
+reset_states(model)
 
-p <- model %>% predict(list(sets$test$x, sets$test$features))
+model <- load_model_hdf5("./checkpoints/model.hdf5")
+
+# history_df <- 
+#   rbind(
+#     data.frame(data = "training", 
+#                epochs = 1:length(history$metrics$val_main_output_loss), main_output_loss = history$metrics$main_output_loss),
+#     data.frame(data = "validation", 
+#                epochs = 1:length(history$metrics$val_main_output_loss), main_output_loss = history$metrics$val_main_output_loss))
+# 
+# ggplot(data = history_df, aes(x = epochs, y = main_output_loss, color = data)) + 
+#   geom_point() + geom_line()
+
+p <- model %>% predict(list(sets$test$x, sets$test$features), batch_size = 1)
 p <- p[[1]]
 
 p <- exp(p) - sets$adj
 
 
 wk13_preds <- 
-  x %>% 
-  mutate(player = str_replace(player, "NA ", "")) %>%
-  filter(year == 2018, wk == 18) %>% 
-  select(1, 18, 19, 20) %>%
+  score %>% 
+  mutate(player = str_replace(player_key, "NA ", "")) %>%
+  select(player, dk_salary, pos, team) %>%
   # filter(player_key %in% wk13_players) %>% 
   mutate(# salary = sets$test$features[,"salary"]*scaled_dat$sd_salary+scaled_dat$mn_salary, 
          projected_points = as.vector(p*scaled_dat$sd_points+scaled_dat$mn_points),
          position = unlist(lapply(str_split(player, "_"), function(data) data[[2]]))) %>%
-  select(-`17`) %>% 
   inner_join(wk13_2018$df, by = c("player" = "player_key")) %>%
   mutate(salary = dk_salary_raw)
 
@@ -404,18 +465,20 @@ qplot(data = wk13_preds, x = projected_points, dk_points_raw) +
 qplot(wk13_preds$projected_points)
 
 write_csv(wk13_preds, "./data/preds.csv")
-
+wk13_preds <- read_csv("./data/preds.csv")
 source("./draftkings_optimizeR.R")
 
 a <- 
-  find_teams(cap = 50000, wk13_preds %>% 
-               filter(!player %in% c("Le'VeonBell_RB"), 
-                      (salary > 2500 & pos == "TE") |
-                      (salary > 5000 & pos == "QB") |
-                      (salary > 3000 & pos == "WR") |
-                      (salary > 3000 & pos == "RB") |
-                      (salary > 0 & pos == "Def"))) %>% 
-  select(player, salary, projected_points, dk_points_raw, team, h_a, oppt, 
+  find_teams(cap = 50000, train = wk13_preds %>% 
+               filter((dk_salary.x > 2500 & pos.x == "TE") |
+                      (dk_salary.x > 4700 & pos.x == "QB") |
+                      (dk_salary.x > 3000 & pos.x == "WR") |
+                      (dk_salary.x > 3000 & pos.x == "RB") |
+                      (dk_salary.x > 0 & pos.x == "Def")) %>%
+               filter(!player == "AntonioBrown_WR", !player == "DonteMoncrief_WR")) %>%
+  select(player, salary, projected_points, dk_points_raw, team.x, h_a, oppt, 
          TeamSalary, TotalPoints, ActualPoints)
 
 View(a)
+print(a)
+cat(a)

@@ -1,3 +1,6 @@
 *.csv
 .Rhistory
 *.html
+checkpoints*
+checkpoints2*
+*pdf

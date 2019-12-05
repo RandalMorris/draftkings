@@ -7,12 +7,12 @@ dat <- read_csv("./data/preds.csv")
 dat <- 
   dat %>% 
   filter((dk_salary.x > 2500 & pos.x == "TE") |
-           (dk_salary.x > 4700 & pos.x == "QB") |
-           (dk_salary.x > 3000 & pos.x == "WR") |
-           (dk_salary.x > 3000 & pos.x == "RB") |
+           (dk_salary.x > 4900 & pos.x == "QB") |
+           (dk_salary.x > 3900 & pos.x == "WR") |
+           (dk_salary.x > 3900 & pos.x == "RB") |
            (dk_salary.x > 0 & pos.x == "Def"),
-         projected_points > 0,
-         !player %in% c("BlakeBortles_QB", "A.J.Green_WR", "joshDoctson_WR", "JoshDoctson_WR", "DavidMoore_WR", "AlexErickson_WR")) %>%
+         projected_points > 0) %>%
+  filter(!player %in% !player %in% c()) %>%
   rename(franchise = team.x)
 
 sample(x = dat$player, size = 9, prob = dat$projected_points)
@@ -42,7 +42,7 @@ sample_position <-
   }
 
 teams <- NULL
-for (j in 1:1000) {
+for (j in 1:10000) {
   
   success <- FALSE
   while (!success) {
@@ -96,6 +96,6 @@ teams_filtered <-
 View(teams_filtered)
 
 # build lineup based on starting qb
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "TomBrady_QB")) %>% ungroup() %>% top_n(1, team_points)
-teams_filtered %>% group_by(team_i) %>% filter(any(player == "GardnerMinshew_QB")) %>% ungroup() %>% top_n(1, team_points)
+teams_filtered %>% group_by(team_i) %>% filter(any(player == "NickFoles_QB")) %>% ungroup() %>% top_n(1, team_points)
+
 
